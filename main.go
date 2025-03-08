@@ -14,6 +14,12 @@ type User struct {
 	Email string `json:"email"`
 }
 
+type APIResponse struct {
+	Success bool        `json:"success"`
+	Data    interface{} `json:"data,omitempty"`
+	Error   string      `json:"error,omitempty"`
+}
+
 var (
 	users  = make(map[int]User)
 	nextID = 1
@@ -25,7 +31,22 @@ func main() {
 	http.HandleFunc("/users/", userHandler)
 	log.Println("Server started at :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
 
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	response := APIResponse{
+		Success: false,
+		Error:   message,
+	}
+	writeJSON(w, status, response)
 }
 
 func usersHandler(w http.ResponseWriter, r *http.Request) {
@@ -35,14 +56,14 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		createUser(w, r)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 }
 
 func userHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.URL.Path[len("/users/"):])
 	if err != nil {
-		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Invalid user ID")
 		return
 	}
 
@@ -54,65 +75,85 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		deleteUser(w, r, id)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 }
 
 func listUsers(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
-	defer mu.Unlock()
 	var userList []User
 	for _, user := range users {
 		userList = append(userList, user)
 	}
-	json.NewEncoder(w).Encode(userList)
+	mu.Unlock()
+
+	response := APIResponse{
+		Success: true,
+		Data:    userList,
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func createUser(w http.ResponseWriter, r *http.Request) {
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
+
 	mu.Lock()
 	user.ID = nextID
 	nextID++
 	users[user.ID] = user
 	mu.Unlock()
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user)
+
+	response := APIResponse{
+		Success: true,
+		Data:    user,
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func getUser(w http.ResponseWriter, r *http.Request, id int) {
 	mu.Lock()
 	user, exists := users[id]
 	mu.Unlock()
+
 	if !exists {
-		http.Error(w, "User not found", http.StatusNotFound)
+		writeError(w, http.StatusNotFound, "User not found")
 		return
 	}
-	json.NewEncoder(w).Encode(user)
 
+	response := APIResponse{
+		Success: true,
+		Data:    user,
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func updateUser(w http.ResponseWriter, r *http.Request, id int) {
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		http.Error(w, "Invalid request Payload", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
+
 	mu.Lock()
 	_, exists := users[id]
 	if !exists {
 		mu.Unlock()
-		http.Error(w, "User not found", http.StatusNotFound)
+		writeError(w, http.StatusNotFound, "User not found")
 		return
 	}
 	user.ID = id
 	users[id] = user
 	mu.Unlock()
-	json.NewEncoder(w).Encode(user)
 
+	response := APIResponse{
+		Success: true,
+		Data:    user,
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func deleteUser(w http.ResponseWriter, r *http.Request, id int) {
@@ -120,10 +161,14 @@ func deleteUser(w http.ResponseWriter, r *http.Request, id int) {
 	_, exists := users[id]
 	if !exists {
 		mu.Unlock()
-		http.Error(w, "User not Found", http.StatusNotFound)
+		writeError(w, http.StatusNotFound, "User not found")
 		return
 	}
 	delete(users, id)
 	mu.Unlock()
-	w.WriteHeader(http.StatusNoContent)
+
+	response := APIResponse{
+		Success: true,
+	}
+	writeJSON(w, http.StatusOK, response)
 }
