@@ -1,3 +1,3 @@
-module github.com/Miguelportillo2475/golang-crud
+module https://github.com/MiguelP-Dev/GolangPureCrudApi
 
 go 1.23.1
